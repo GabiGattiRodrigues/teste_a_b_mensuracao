@@ -85,6 +85,16 @@ teste, do período escolhido e da variante, pra sempre dar o mesmo
 resultado pro mesmo filtro. Ligar isso a dados reais (BigQuery, um data
 warehouse) é o próximo passo natural, fora do escopo deste protótipo.
 
+## Tutorial dentro do app
+
+Logo abaixo do cabeçalho tem dois menus expansíveis: **"📖 Como usar o
+Michelangelo (passo a passo)"**, com o fluxo completo (escolher o teste,
+dizer há quantos dias está rodando, escolher a variante, e o que olhar em
+cada seção da tela), e **"❓ Como interpretar os resultados"**, explicando o
+que significam a probabilidade, o lift, o intervalo de credibilidade, o
+checklist e os guardrails. Não precisa sair do app nem ler este README pra
+usar — é só abrir esses dois menus.
+
 ## Login
 
 Antes de mostrar qualquer coisa, o Michelangelo pede nome e senha — igual
@@ -114,6 +124,7 @@ teste_ab_mensuracao\
   davinci_path.txt           <- opcional: caminho da pasta do DaVinci, se não for irmã desta
   assets\
     michelangelo_mascote.png
+    davi_icon.png             <- ícone do Davi, ao lado da saudação na tela de login
     historico_exemplo.json   <- os 3 exemplos usados quando o DaVinci ainda não tem testes salvos
   .streamlit\
     config.toml              <- mesmo tema visual do DaVinci

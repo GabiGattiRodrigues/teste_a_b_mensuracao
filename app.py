@@ -181,7 +181,26 @@ with col_usuario:
         st.session_state.is_admin = False
         st.rerun()
 
-with st.expander("❓ Como funciona"):
+with st.expander("📖 Como usar o Michelangelo (passo a passo)", expanded=False):
+    st.markdown(
+        "**1. Escolha o teste.** No menu \"Qual teste você quer medir?\" logo abaixo, escolha o "
+        "teste que já está rodando de verdade. A ficha dele (BU, métrica, campanha, meta de amostra, "
+        "prazo) vem travada do DaVinci, só pra conferência — não dá pra editar por aqui de propósito.\n\n"
+        "**2. Diga há quantos dias ele está rodando.** No campo \"Período\", digite quantos dias já "
+        "se passaram desde que o teste foi ao ar de verdade (não precisa ser 7, 14 ou 30 — pode ser "
+        "qualquer número).\n\n"
+        "**3. Escolha qual variante comparar.** Se o teste tiver mais de dois grupos, o Michelangelo "
+        "sempre compara o Controle contra **um** desafiante por vez — escolha qual.\n\n"
+        "**4. Role a tela, na ordem que ela já vem:** primeiro se a amostra planejada foi atingida "
+        "(e o que fazer se ainda não foi), depois quem está ganhando e com que confiança, depois um "
+        "checklist de coisas pra conferir manualmente, e por fim os gráficos que mostram esse resultado "
+        "visualmente.\n\n"
+        "**5. Antes de aplicar a mudança pra todo mundo, confira o checklist.** A ferramenta calcula a "
+        "estatística sozinha, mas coisas como \"a divisão entre os grupos ficou mesmo igual?\" ou "
+        "\"alguém viu as duas versões sem querer?\" só uma olhada manual consegue confirmar."
+    )
+
+with st.expander("❓ Como interpretar os resultados"):
     st.markdown(
         "**Por que a probabilidade é sobre \"quantas vezes eu ganharia\", e não um número seco?**\n\n"
         "Cada grupo (Controle e Variante) não tem um resultado fixo — tem uma **nuvem de valores "
@@ -189,6 +208,30 @@ with st.expander("❓ Como funciona"):
         "nuvem **3.000 vezes** (Monte Carlo) e contamos em quantas a Variante ganhou. Se ganhou em "
         "2.850 de 3.000, a probabilidade é 95% — é como jogar uma moeda viciada 3.000 vezes e ver "
         "quantas vezes deu cara."
+    )
+    st.markdown(
+        "**O que é o \"lift esperado\"?**\n\n"
+        "É o tamanho médio da diferença entre a Variante e o Controle, em porcentagem — não só "
+        "\"quem ganha\", mas \"por quanto\". Um lift de +8% quer dizer que, na média das simulações, "
+        "a Variante veio 8% acima do Controle. Repare que dá pra ter uma probabilidade alta de "
+        "vitória (ex.: 96%) com um lift pequeno (ex.: +2%) — a Variante ganha quase sempre, mas por "
+        "pouco."
+    )
+    st.markdown(
+        "**O que é o \"intervalo de credibilidade (90%)\"?**\n\n"
+        "É a faixa onde o efeito real provavelmente está — em vez de um número seco, um \"tenho quase "
+        "certeza que está entre X e Y\". Quanto mais estreita, mais preciso é o palpite (e ela só "
+        "fica mais estreita com mais gente medida). Se essa faixa cruzar o zero (ex.: -2% a +9%), "
+        "isso é sinal de que ainda não dá pra ter certeza da direção do efeito — a conta completa de "
+        "onde ele vem está no \"Ver a conta\" logo abaixo do resultado."
+    )
+    st.markdown(
+        "**Pra que serve o checklist e os guardrails?**\n\n"
+        "São verificações que a estatística sozinha não consegue fazer. O checklist olha coisas como "
+        "divisão desigual entre os grupos (SRM), gente vendo as duas versões sem querer (crossover) "
+        "ou o efeito sumir depois dos primeiros dias (novidade). Os guardrails são métricas que **não "
+        "podem piorar** mesmo se a métrica principal melhorar (ex.: custo por cliente, tempo de "
+        "checkout) — servem pra pegar um \"efeito colateral\" ruim escondido atrás de um bom resultado."
     )
     st.markdown(
         "**Por que por usuário único, e não por sessão?**\n\n"
@@ -201,6 +244,12 @@ with st.expander("❓ Como funciona"):
         "Vêm prontos do **DaVinci** — é lá que se decide o objetivo, a métrica, o público e quantas "
         "pessoas por grupo o teste precisa. O Michelangelo só lê isso (nunca deixa editar) e "
         "acompanha se a medição de hoje já bateu essa meta."
+    )
+    st.markdown(
+        "**E se a amostra planejada ainda não foi atingida?**\n\n"
+        "O Michelangelo calcula três caminhos possíveis — prorrogar o teste, aceitar menos confiança "
+        "e decidir com o que já tem, ou parar sem decidir — e marca qual costuma fazer mais sentido "
+        "pro seu caso, na seção \"Amostra planejada × observada\"."
     )
 
 if st.session_state.get("is_admin"):
