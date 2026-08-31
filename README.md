@@ -18,8 +18,8 @@ foi atingida.
    estiver — marque "Add Python to PATH" na instalação).
 2. Dê duplo clique em **`rodar_michelangelo.bat`**.
 3. Na primeira vez, ele instala sozinho o que precisa (`streamlit`,
-   `plotly`) — pode demorar um minuto. Depois disso abre direto no
-   navegador.
+   `plotly`, `gspread`) — pode demorar um minuto. Depois disso abre direto
+   no navegador.
 4. Pra fechar, volte na janela preta que abriu e aperte `Ctrl+C`.
 
 ## Como ele conversa com o DaVinci
@@ -102,6 +102,58 @@ ao DaVinci, e com **as mesmas senhas** (senha padrão de usuário e senha de
 administrador). Quem entra como administrador vê também uma tabelinha com
 quem já entrou no app. Esse controle é só uma trava simples (não é
 autenticação de verdade), do mesmo jeito que já era no DaVinci.
+
+## Ver quem usou o Michelangelo em qualquer dispositivo
+
+Por padrão, o registro de "quem já entrou" (`usuarios_log.json`) fica só na
+máquina/processo que está rodando o app naquele momento — não é
+compartilhado entre instâncias. Isso significa:
+
+- Se você roda o app localmente (`.bat`) e também testa pelo app publicado
+  no Streamlit Cloud, são dois registros separados.
+- No Streamlit Community Cloud o app "dorme" e reinicia sozinho por
+  inatividade — e cada reinício apaga esse arquivo, então o painel de admin
+  só mostra quem entrou depois do último reinício.
+
+Pra ter uma lista única, igual pra qualquer computador/celular que acessar o
+app, dá pra ligar o log numa planilha Google compartilhada. É opcional — sem
+configurar nada, o app continua funcionando normalmente com o arquivo local.
+
+**1. Crie a planilha:** no Google Sheets, crie uma planilha nova (ex:
+"Michelangelo — Log de usuários") com uma aba cuja primeira linha tenha
+exatamente as colunas: `nome`, `quando`, `tipo`.
+
+**2. Crie uma conta de serviço no Google Cloud** (gratuito):
+   - Entre em [console.cloud.google.com](https://console.cloud.google.com),
+     crie um projeto (ou use um existente).
+   - Em "APIs e serviços" → "Biblioteca", ative a **Google Sheets API** e a
+     **Google Drive API**.
+   - Em "APIs e serviços" → "Credenciais" → "Criar credenciais" → "Conta de
+     serviço". Dê um nome (ex: `michelangelo-log`) e crie.
+   - Na conta de serviço criada, aba "Chaves" → "Adicionar chave" → "Criar
+     nova chave" → formato **JSON**. Isso baixa um arquivo `.json` — guarde
+     ele, é a credencial.
+
+**3. Compartilhe a planilha com a conta de serviço:** abra o arquivo `.json`
+baixado, copie o valor de `client_email` (algo como
+`michelangelo-log@seu-projeto.iam.gserviceaccount.com`), e compartilhe a
+planilha do passo 1 com esse e-mail, dando permissão de **Editor**.
+
+**4. Preencha os secrets:** copie `.streamlit/secrets.toml.example` para
+`.streamlit/secrets.toml` e preencha com o link da planilha (`gsheets_log_url`)
+e os dados do arquivo `.json` baixado (cada campo do JSON vira uma linha em
+`[gcp_service_account]`). Esse arquivo `secrets.toml` **não vai pro git**
+(já está no `.gitignore`) — é só local.
+
+**5. No Streamlit Community Cloud:** o app publicado não lê o
+`secrets.toml` da sua máquina. Entre nas configurações do app lá no portal
+(⋮ → Settings → Secrets) e cole lá o mesmo conteúdo do seu
+`secrets.toml` já preenchido.
+
+Depois disso, o painel de admin passa a mostrar "vindas da planilha
+compartilhada" e lista todo mundo que entrou, de qualquer dispositivo. Se a
+planilha não estiver configurada (ou dado algum erro de acesso), o app
+volta sozinho a usar o arquivo local, sem quebrar.
 
 ## Sobre as imagens
 

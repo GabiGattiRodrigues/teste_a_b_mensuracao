@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Dados gerados localmente (não fazem parte do código)
+historico_medicoes.json
+usuarios_log.json
+
+# Segredos (credenciais da planilha Google etc.) — nunca comitar
+.streamlit/secrets.toml
+
+# Sistema
+.DS_Store
+Thumbs.db

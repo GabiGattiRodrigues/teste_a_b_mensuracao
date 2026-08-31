@@ -52,7 +52,51 @@ COR_VARIANTE = "#DD7024"
 st.set_page_config(page_title="Michelangelo — Medição de Teste A/B", page_icon=_page_icon, layout="wide")
 
 
-def _carregar_usuarios_log() -> list:
+# --------------------------------------------------------------------------
+# Log de "quem já entrou" — por padrão fica só num arquivo local (não
+# aparece pra quem acessa de outro computador/celular/instância). Se uma
+# planilha Google for configurada nos secrets (veja o README), o log passa
+# a ser escrito e lido dali, e aí sim fica igual pra todo mundo, em
+# qualquer device. Se a planilha não estiver configurada ou der erro, o
+# app volta sozinho a usar o arquivo local — nunca quebra por causa disso.
+# (Mesmo mecanismo do DaVinci.)
+# --------------------------------------------------------------------------
+
+_SHEETS_SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+# _planilha_usuarios() devolve (aba, motivo_do_erro) -- os DOIS presos
+# juntos no mesmo cache (@st.cache_resource), em vez de guardar o motivo
+# numa variável global à parte. É de propósito: o Streamlit reexecuta o
+# script inteiro a cada interação, então uma variável global reatribuída
+# no topo do arquivo (ex.: "_ERRO_PLANILHA = None") volta a zero em toda
+# rodada nova -- e como a função em si só roda de fato uma vez (o resto
+# são acertos de cache), o motivo do erro se perdia assim que a rodada
+# seguinte começava (o que acontece sempre que o login dá um st.rerun()).
+# Devolvendo os dois juntos, o valor certo vem sempre, cache ou não.
+@st.cache_resource(show_spinner=False)
+def _planilha_usuarios():
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError as e:
+        return None, f"biblioteca não instalada ({e}) — rode 'pip install -r requirements.txt' de novo."
+    try:
+        if "gcp_service_account" not in st.secrets or "gsheets_log_url" not in st.secrets:
+            return None, "secrets não configurados (faltando gcp_service_account e/ou gsheets_log_url)."
+        creds = Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]), scopes=_SHEETS_SCOPES
+        )
+        cliente = gspread.authorize(creds)
+        aba = cliente.open_by_url(st.secrets["gsheets_log_url"]).sheet1
+        return aba, None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+def _carregar_usuarios_log_local() -> list:
     if USUARIOS_LOG_PATH.exists():
         try:
             return json.loads(USUARIOS_LOG_PATH.read_text(encoding="utf-8"))
@@ -61,9 +105,28 @@ def _carregar_usuarios_log() -> list:
     return []
 
 
+def _carregar_usuarios_log() -> list:
+    aba, _ = _planilha_usuarios()
+    if aba is not None:
+        try:
+            return aba.get_all_records()
+        except Exception:
+            pass
+    return _carregar_usuarios_log_local()
+
+
 def _registrar_usuario(nome: str, admin: bool) -> None:
-    log = _carregar_usuarios_log()
-    log.insert(0, {"nome": nome, "quando": datetime.now().strftime("%d/%m/%Y %H:%M"), "admin": admin})
+    quando = datetime.now().strftime("%d/%m/%Y %H:%M")
+    tipo = "Administradora" if admin else "Usuário"
+    aba, _ = _planilha_usuarios()
+    if aba is not None:
+        try:
+            aba.append_row([nome, quando, tipo])
+            return
+        except Exception:
+            pass
+    log = _carregar_usuarios_log_local()
+    log.insert(0, {"nome": nome, "quando": quando, "tipo": tipo})
     USUARIOS_LOG_PATH.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -255,13 +318,39 @@ with st.expander("❓ Como interpretar os resultados"):
 if st.session_state.get("is_admin"):
     st.divider()
     st.subheader("👥 Usuários que já entraram no Michelangelo")
+    _aba_usuarios, _erro_planilha = _planilha_usuarios()
+    _usando_planilha = _aba_usuarios is not None
     _usuarios = _carregar_usuarios_log()
+
+    if not _usando_planilha:
+        if _erro_planilha:
+            st.caption(
+                "⚠️ Não consegui usar a planilha Google — caiu pro arquivo local (só desta instância). "
+                "Motivo:"
+            )
+            st.code(_erro_planilha, language=None)
+        else:
+            st.caption(
+                "Planilha Google não configurada — usando o arquivo local (só desta instância). "
+                "Veja o README, seção \"Ver quem usou o Michelangelo em qualquer dispositivo\"."
+            )
+
     if not _usuarios:
         st.caption("Ninguém entrou ainda.")
     else:
-        st.caption(f"{len(_usuarios)} entrada(s) de login registrada(s) neste computador.")
+        if _usando_planilha:
+            st.caption(
+                f"{len(_usuarios)} entrada(s) — vindas da planilha compartilhada "
+                "(conta quem entrou em qualquer computador, celular ou instância que usa essa planilha)."
+            )
+        else:
+            st.caption(f"{len(_usuarios)} entrada(s) registrada(s) só nesta instância.")
         st.table([
-            {"Nome": u.get("nome", ""), "Quando": u.get("quando", ""), "Tipo": "Administradora" if u.get("admin") else "Usuário"}
+            {
+                "Nome": u.get("nome", ""),
+                "Quando": u.get("quando", ""),
+                "Tipo": u.get("tipo") or ("Administradora" if u.get("admin") else "Usuário"),
+            }
             for u in _usuarios
         ])
 
