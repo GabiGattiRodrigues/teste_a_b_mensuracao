@@ -45,8 +45,8 @@ USUARIOS_LOG_PATH = Path(__file__).parent / "usuarios_log.json"
 # uma trava simples pra separar "uso normal" de "modo admin".
 SENHA_ADMIN = "teste_a_b_gabi"
 
-COR_CONTROLE = "#0E8A74"
-COR_VARIANTE = "#DD7024"
+COR_CONTROLE = "#9AA9BF"
+COR_VARIANTE = "#2A78D6"
 
 st.set_page_config(page_title="Michelangelo — Medição de Teste A/B", page_icon=_page_icon, layout="wide")
 
@@ -144,7 +144,7 @@ if not st.session_state.get("usuario_nome"):
                 st.image(str(LOGO_PATH), width=140)
         st.markdown(
             f"<h2 style='text-align:center; margin-bottom:4px;'>Oi! Eu sou o Michelangelo {_DAVI_ICON_TAG}</h2>"
-            "<p style='text-align:center; color:#7A6752; font-size:15px; margin-top:0;'>"
+            "<p style='text-align:center; color:#5B6B82; font-size:15px; margin-top:0;'>"
             "Vou te ajudar a medir o seu teste A/B que já está rodando, todo explicado em "
             "português simples — sem precisar saber estatística de antemão.</p>",
             unsafe_allow_html=True,
@@ -172,14 +172,14 @@ if not st.session_state.get("usuario_nome"):
 
 _CSS = """
 <style>
-.chip { display:inline-block; background:#FBF0D2; color:#6B4E00; border-radius:999px;
+.chip { display:inline-block; background:#E3EDFB; color:#1F4E8C; border-radius:999px;
         padding:5px 11px; font-size:12.5px; margin:3px 6px 0 0; }
-.ficha { background:#FFF1E3; border:1px solid #F3D9BC; border-radius:10px; padding:16px 18px 8px; }
+.ficha { background:#EEF4FC; border:1px solid #C9DAF1; border-radius:10px; padding:16px 18px 8px; }
 .ficha-header { display:flex; justify-content:space-between; align-items:center;
-                font-size:12.5px; font-weight:600; color:#7A6752; margin-bottom:10px;
-                padding-bottom:10px; border-bottom:1px dashed #EAD9C6; }
-.ficha-id { font-family: "SFMono-Regular", Menlo, monospace; color:#B8430A; background:#fff;
-            border:1px solid #EAD9C6; border-radius:6px; padding:2px 8px; }
+                font-size:12.5px; font-weight:600; color:#5B6B82; margin-bottom:10px;
+                padding-bottom:10px; border-bottom:1px dashed #D6E2F2; }
+.ficha-id { font-family: "SFMono-Regular", Menlo, monospace; color:#1B5DB0; background:#fff;
+            border:1px solid #D6E2F2; border-radius:6px; padding:2px 8px; }
 .banner { border-radius:10px; padding:12px 16px; font-size:14px; margin:10px 0; }
 .banner.good { background:#E9F5E1; color:#2C6B1F; }
 .banner.warn { background:#FBF0D2; color:#6B4E00; }
@@ -189,19 +189,19 @@ _CSS = """
 .verdict.good { background:#E9F5E1; }
 .verdict.bad  { background:#FBE3DE; }
 .verdict.mid  { background:#FBF0D2; }
-.verdict.none { background:#F1ECE4; }
+.verdict.none { background:#EDF1F7; }
 .verdict .icon { font-size:28px; line-height:1; }
-.verdict .title { font-size:17px; font-weight:700; color:#241708; margin-bottom:4px; }
-.verdict .sub { font-size:13.5px; color:#4A3B2C; line-height:1.5; }
+.verdict .title { font-size:17px; font-weight:700; color:#0F1E36; margin-bottom:4px; }
+.verdict .sub { font-size:13.5px; color:#34445C; line-height:1.5; }
 .pg-wrap { display:grid; grid-template-columns: repeat(20, 1fr); gap:3px; max-width:340px; }
 .pg-dot { width:100%; aspect-ratio:1; border-radius:50%; }
 .pg-dot.win  { background: __VARIANT_COLOR__; }
-.pg-dot.lose { background: #D9CBB8; }
-.decision-card { border:1px solid #EAD9C6; border-radius:10px; padding:14px 16px; margin-bottom:10px; }
-.decision-card.recommended { border-color:#E85C0D; background:#FFF6EC; }
-.decision-tag { display:inline-block; background:#E85C0D; color:#fff; font-size:10.5px;
+.pg-dot.lose { background: #C8D3E3; }
+.decision-card { border:1px solid #D6E2F2; border-radius:10px; padding:14px 16px; margin-bottom:10px; }
+.decision-card.recommended { border-color:#2A78D6; background:#F3F7FD; }
+.decision-tag { display:inline-block; background:#2A78D6; color:#fff; font-size:10.5px;
                 font-weight:700; border-radius:999px; padding:2px 9px; margin-left:8px; }
-.check-hint { font-size:12.5px; color:#7A6752; margin:2px 0 10px 26px; line-height:1.5; }
+.check-hint { font-size:12.5px; color:#5B6B82; margin:2px 0 10px 26px; line-height:1.5; }
 </style>
 """.replace("__VARIANT_COLOR__", COR_VARIANTE)
 
@@ -224,13 +224,13 @@ with col_title:
     )
 with col_usuario:
     _selo_admin = (
-        " <span style='background:#FBF0D2; color:#6B4E00; border-radius:999px; padding:2px 9px; "
+        " <span style='background:#E3EDFB; color:#1F4E8C; border-radius:999px; padding:2px 9px; "
         "font-size:11px; font-weight:600; margin-left:4px;'>admin</span>"
         if st.session_state.get("is_admin") else ""
     )
     st.markdown(
         f"<div style='text-align:right; padding-top:20px;'>"
-        f"<span style='font-size:14px; color:#7A6752;'>👋 Olá, <b>{_esc(st.session_state.usuario_nome)}</b></span>"
+        f"<span style='font-size:14px; color:#5B6B82;'>👋 Olá, <b>{_esc(st.session_state.usuario_nome)}</b></span>"
         f"{_selo_admin}</div>",
         unsafe_allow_html=True,
     )
@@ -388,13 +388,13 @@ st.markdown(
     f'<div class="ficha">'
     f'<div class="ficha-header"><span>🔒 Cadastrado no DaVinci — não editável aqui</span>'
     f'<span class="ficha-id">{_esc(test["id"])}</span></div>'
-    f'<div style="font-size:13.5px; color:#4A3B2C; margin-bottom:10px;">'
+    f'<div style="font-size:13.5px; color:#34445C; margin-bottom:10px;">'
     f'<strong>{_esc(test.get("objetivo") or "Objetivo não preenchido no DaVinci")}</strong>'
     f'{" · " + _esc(test["area"]) if test.get("area") else ""}</div>'
     f'{chips}'
-    f'<div style="margin-top:12px; display:flex; gap:24px; font-size:13px; color:#7A6752;">'
-    f'<span>🎯 Meta de amostra: <strong style="color:#241708;">{meta_fmt} por grupo</strong></span>'
-    f'<span>🗓️ Prazo planejado: <strong style="color:#241708;">{prazo_fmt}</strong></span>'
+    f'<div style="margin-top:12px; display:flex; gap:24px; font-size:13px; color:#5B6B82;">'
+    f'<span>🎯 Meta de amostra: <strong style="color:#0F1E36;">{meta_fmt} por grupo</strong></span>'
+    f'<span>🗓️ Prazo planejado: <strong style="color:#0F1E36;">{prazo_fmt}</strong></span>'
     f'</div></div>',
     unsafe_allow_html=True,
 )
@@ -459,7 +459,7 @@ else:
         col.markdown(
             f'<div class="decision-card{" recommended" if o["recomendado"] else ""}">'
             f'<div style="font-weight:700; margin-bottom:6px;">{o["titulo"]}{tag}</div>'
-            f'<div style="font-size:12.5px; color:#4A3B2C;">{o["desc"]}</div></div>',
+            f'<div style="font-size:12.5px; color:#34445C;">{o["desc"]}</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -487,7 +487,7 @@ pct_str = f"{r.p_melhor*100:.1f}".replace(".", ",") + "%"
 
 col_fig, col_pg = st.columns([1, 2])
 with col_fig:
-    st.markdown(f"<div style='font-size:52px; font-weight:800; color:#B8430A; font-family:monospace;'>{pct_str}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:52px; font-weight:800; color:#1B5DB0; font-family:monospace;'>{pct_str}</div>", unsafe_allow_html=True)
     strength = max(r.p_melhor, 1 - r.p_melhor)
     badge_label = "Evidência forte" if strength >= 0.95 else "Evidência moderada" if strength >= 0.80 else "Sem diferença clara"
     side = f"{variante_label} à frente" if r.p_melhor >= 0.5 else "Controle à frente"
@@ -611,8 +611,8 @@ st.markdown(
     f'não sabe o valor exato de cada grupo — só tem <em>palpites</em>, uns mais prováveis que outros. Cada curva '
     f'colorida é o "mapa de palpites" de um grupo: onde ela fica mais alta (o topo do montinho), é o valor que a '
     f'gente acha mais provável de ser o valor real; onde ela é baixinha, nas pontas, é um valor bem improvável. '
-    f'Nesse caso, o topo do montinho verde (Controle) fica perto de <strong>{_esc(_media_c_fmt)}</strong>, e o do '
-    f'laranja (Variante) perto de <strong>{_esc(_media_v_fmt)}</strong>. Quando os dois montinhos ficam bem '
+    f'Nesse caso, o topo do montinho cinza (Controle) fica perto de <strong>{_esc(_media_c_fmt)}</strong>, e o do '
+    f'azul (Variante) perto de <strong>{_esc(_media_v_fmt)}</strong>. Quando os dois montinhos ficam bem '
     f'separados um do outro (pouca área onde eles se sobrepõem), é sinal forte de que os grupos são mesmo '
     f'diferentes — quando ficam quase um em cima do outro, ainda não dá pra ter certeza de qual é melhor.</div>',
     unsafe_allow_html=True,
@@ -668,7 +668,7 @@ if guard_itens:
     for g in guard_itens:
         status_txt = "⚠ atenção" if g["risco"] else "✓ estável"
         cor = "#9A2A17" if g["risco"] else "#2C6B1F"
-        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #EAD9C6;"><span>{_esc(g["nome"])}</span><span style="color:{cor}; font-weight:600;">{status_txt} · {m.fmt_pct_signed(g["delta_pct"]/100)}</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #D6E2F2;"><span>{_esc(g["nome"])}</span><span style="color:{cor}; font-weight:600;">{status_txt} · {m.fmt_pct_signed(g["delta_pct"]/100)}</span></div>', unsafe_allow_html=True)
 else:
     st.caption("Nenhum guardrail definido para essa BU.")
 
