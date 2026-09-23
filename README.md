@@ -5,6 +5,9 @@ Michelangelo é o companheiro do **DaVinci**: enquanto o DaVinci cuida do
 o Michelangelo cuida da **medição** — acompanhar um teste que já está
 rodando e dizer, em português simples, se ele funcionou ou não.
 
+🌐 Português e inglês: botão PT/EN no topo do app (ou `?lang=en` na URL). Lê testes salvos pelo
+DaVinci nas duas línguas.
+
 Ele roda 100% no seu computador (nada é enviado pra internet) e explica
 cada conceito estatístico como se fosse pra alguém que nunca estudou
 estatística: o que significa "97,3% de chance de a Variante ser melhor",
@@ -188,3 +191,20 @@ Assim como o DaVinci deixa de fora o acompanhamento pós-desenho, o
 Michelangelo deixa de fora o desenho do teste — objetivo, público-alvo,
 tamanho de amostra e prazo são decisões do DaVinci, e aqui chegam prontas,
 só para leitura.
+
+## English
+
+**Michelangelo — A/B test measurement assistant.** DaVinci's companion: it
+measures an A/B test that's already running, with Bayesian inference explained
+in plain language — Beta-Binomial for proportions, a normal approximation for
+averages, 3,000 Monte Carlo draws for the probability that the variant wins, the
+expected lift and a 90% credible interval. It also compares planned vs. observed
+sample (with extend / accept-less-confidence / stop options when the target
+wasn't reached), a contamination checklist (SRM, crossover, duplicates, novelty,
+guardrails) and a saved measurement history. The test record (goal, metric,
+sample target, duration) comes read-only from DaVinci — saved in either
+language. Measurement data is synthetic, for demonstration.
+
+The whole app switches to English with the PT/EN toggle at the top (or
+`?lang=en`). To run it: `pip install -r requirements.txt` and
+`streamlit run app.py`.

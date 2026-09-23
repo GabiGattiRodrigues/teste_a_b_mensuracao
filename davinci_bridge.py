@@ -33,6 +33,7 @@ from pathlib import Path
 
 ASSETS_DIR = Path(__file__).parent / "assets"
 EXEMPLO_PATH = ASSETS_DIR / "historico_exemplo.json"
+EXEMPLO_PATH_EN = ASSETS_DIR / "historico_exemplo_en.json"  # os mesmos exemplos, em inglês
 
 # Pasta do DaVinci: por padrão, pasta irmã "teste_ab_desenho" (mesmo nível
 # desta pasta do Michelangelo). Se você organizou diferente, edite o
@@ -61,10 +62,26 @@ def _extrair(padrao: str, texto: str, default: str = "") -> str:
     return valor or default
 
 
+# O DaVinci salva o resumo na língua em que foi usado. A leitura aceita as
+# duas: título de seção e rótulo em inglês são mapeados para o português.
+_SECOES = {
+    "Contexto do experimento": ["Contexto do experimento", "Experiment context"],
+    "O que estamos testando": ["O que estamos testando", "What we are testing"],
+}
+_ROTULOS_EN = {"Metric": "Métrica", "Experiment": "Experimento", "Region": "Região",
+               "Campaign": "Campanha", "Platform": "Plataforma", "Device": "Dispositivo",
+               "Today": "Hoje"}
+
+
+def _secao(secao_titulo: str) -> str:
+    """Regex que casa o título da seção em qualquer uma das línguas."""
+    return "(?:" + "|".join(re.escape(t) for t in _SECOES.get(secao_titulo, [secao_titulo])) + ")"
+
+
 def _extrair_chips(texto: str, secao_titulo: str) -> dict:
     """Extrai os chips 'Rótulo: Valor' de uma seção <h4>secao_titulo</h4><div>...</div>."""
     bloco = re.search(
-        r"<h4>" + re.escape(secao_titulo) + r"</h4>\s*<div>(.*?)</div>", texto, re.DOTALL
+        r"<h4>" + _secao(secao_titulo) + r"</h4>\s*<div>(.*?)</div>", texto, re.DOTALL
     )
     if not bloco:
         return {}
@@ -73,14 +90,15 @@ def _extrair_chips(texto: str, secao_titulo: str) -> dict:
     for chip in chips:
         if ":" in chip:
             rotulo, valor = chip.split(":", 1)
-            out[rotulo.strip()] = valor.strip()
+            rotulo = rotulo.strip()
+            out[_ROTULOS_EN.get(rotulo, rotulo)] = valor.strip()
     return out
 
 
 def _extrair_metric_grid(texto: str, secao_titulo: str) -> dict:
     """Extrai pares rótulo/valor de uma grade <h4>...</h4><div class="grid">...</div>."""
     bloco = re.search(
-        r"<h4>" + re.escape(secao_titulo) + r"</h4>\s*<div class=\"grid[^\"]*\">(.*?)</div>\s*(?:<h4>|<div class=\"foot)",
+        r"<h4>" + _secao(secao_titulo) + r"</h4>\s*<div class=\"grid[^\"]*\">(.*?)</div>\s*(?:<h4>|<div class=\"foot)",
         texto, re.DOTALL,
     )
     if not bloco:
@@ -88,7 +106,7 @@ def _extrair_metric_grid(texto: str, secao_titulo: str) -> dict:
     pares = re.findall(
         r'<div class="l">([^<]+)</div><div class="v">([^<]+)</div>', bloco.group(1)
     )
-    return {rotulo.strip(): valor.strip() for rotulo, valor in pares}
+    return {_ROTULOS_EN.get(rotulo.strip(), rotulo.strip()): valor.strip() for rotulo, valor in pares}
 
 
 def _parse_numero_davinci(s: str) -> tuple[float | None, str, str]:
@@ -115,6 +133,18 @@ def _parse_numero_davinci(s: str) -> tuple[float | None, str, str]:
         m2 = re.match(r"^([\d.,]+)\s*([A-Za-zÀ-ÿ$]+)?$", s)
         if m2:
             corpo, unidade = m2.group(1), (m2.group(2) or "")
+    # O DaVinci escreve sempre 2 casas decimais: o separador antes delas é o
+    # decimal, o outro é o de milhar. Isso cobre "1.234,50" (português) e
+    # "1,234.50" (inglês).
+    fim = re.search(r"([.,])\d{2}$", corpo)
+    if fim:
+        dec = fim.group(1)
+        mil = "," if dec == "." else "."
+        corpo = corpo.replace(mil, "").replace(dec, ".")
+        try:
+            return float(corpo), "media", unidade
+        except ValueError:
+            pass
     try:
         valor = float(corpo.replace(".", "").replace(",", "."))
     except ValueError:
@@ -139,14 +169,14 @@ def parse_resumo_html(resumo_html: str) -> dict:
     testando = _extrair_metric_grid(resumo_html, "O que estamos testando")
 
     hoje_raw = testando.get("Hoje", "")
-    alvo_key = next((k for k in testando if k.startswith("Queremos")), None)
+    alvo_key = next((k for k in testando if k.startswith(("Queremos", "We want"))), None)
     alvo_raw = testando.get(alvo_key, "") if alvo_key else ""
-    direcao = "down" if (alvo_key and "cair" in alvo_key) else "up"
+    direcao = "down" if (alvo_key and ("cair" in alvo_key or "go down" in alvo_key)) else "up"
 
     hoje_val, tipo, unidade = _parse_numero_davinci(hoje_raw)
     alvo_val, _, _ = _parse_numero_davinci(alvo_raw)
 
-    letras_grupo = sorted(set(re.findall(r"Grupo (\w) ·", resumo_html)))
+    letras_grupo = sorted(set(re.findall(r"(?:Grupo|Group) (\w) ·", resumo_html)))
     variantes = [l for l in letras_grupo if l != "A"] or ["B"]
 
     return {
@@ -182,7 +212,7 @@ def _carregar_json(path: Path) -> list:
         return []
 
 
-def carregar_testes_registrados() -> tuple[list, bool]:
+def carregar_testes_registrados(idioma: str = "pt") -> tuple[list, bool]:
     """
     Retorna (lista_de_testes, usando_exemplo).
 
@@ -195,7 +225,8 @@ def carregar_testes_registrados() -> tuple[list, bool]:
     """
     reais = _carregar_json(_historico_path())
     usando_exemplo = not reais
-    fonte = reais if reais else _carregar_json(EXEMPLO_PATH)
+    exemplo = EXEMPLO_PATH_EN if (idioma == "en" and EXEMPLO_PATH_EN.exists()) else EXEMPLO_PATH
+    fonte = reais if reais else _carregar_json(exemplo)
 
     testes = []
     for item in fonte:
@@ -273,7 +304,8 @@ def derive_metric_cfg(test: dict) -> dict:
 def guardrails_para_bu(bu_label: str) -> list:
     from ab_measure import GUARDRAILS_BY_BU, BU_CONFIG
     for slug, cfg in BU_CONFIG.items():
-        if cfg["label"].strip().lower() == (bu_label or "").strip().lower():
+        rotulos = {cfg["label"].strip().lower(), cfg.get("label_en", "").strip().lower()}
+        if (bu_label or "").strip().lower() in rotulos:
             return GUARDRAILS_BY_BU.get(slug, _GUARDRAILS_PADRAO)
     return _GUARDRAILS_PADRAO
 

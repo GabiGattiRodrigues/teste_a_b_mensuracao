@@ -31,7 +31,42 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import threading
 from dataclasses import dataclass, field
+
+
+# ---------------------------------------------------------------------------
+# Lingua dos textos (veredito, checklist, opcoes de decisao, numeros)
+# ---------------------------------------------------------------------------
+# Portugues por padrao. O app chama definir_idioma("en") no comeco de cada
+# execucao; a lingua fica por thread. As contas nao mudam.
+
+_LINGUA = threading.local()
+
+
+def definir_idioma(idioma: str) -> None:
+    _LINGUA.valor = "en" if str(idioma).lower().startswith("en") else "pt"
+
+
+def idioma() -> str:
+    return getattr(_LINGUA, "valor", "pt")
+
+
+def _L(pt: str, en: str) -> str:
+    """A frase na lingua ativa."""
+    return en if idioma() == "en" else pt
+
+
+def _dec(s: str) -> str:
+    """Troca o ponto decimal pela virgula em portugues."""
+    return s if idioma() == "en" else s.replace(".", ",")
+
+
+def _milhar(s: str) -> str:
+    """'1,234.50' (formato Python) -> '1.234,50' em portugues."""
+    if idioma() == "en":
+        return s
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +76,7 @@ from dataclasses import dataclass, field
 
 BU_CONFIG = {
     "varejo": {
-        "label": "Varejo (e-commerce)",
+        "label": "Varejo (e-commerce)", "label_en": "Retail (e-commerce)",
         "metrics": {
             "conv_checkout": {"label": "Taxa de conversão do checkout", "type": "proporcao", "direction": "up", "base": 0.045, "jitter": 0.015},
             "rev_per_session": {"label": "Receita por usuário", "type": "media", "direction": "up", "unit": "R$", "base": 3.2, "jitter": 0.9, "sd": 6.5},
@@ -50,7 +85,7 @@ BU_CONFIG = {
         },
     },
     "clube": {
-        "label": "Assinatura / Clube",
+        "label": "Assinatura / Clube", "label_en": "Subscription / Club",
         "metrics": {
             "conv_assinatura": {"label": "Taxa de conversão da assinatura", "type": "proporcao", "direction": "up", "base": 0.081, "jitter": 0.02},
             "churn": {"label": "Churn mensal", "type": "proporcao", "direction": "down", "base": 0.052, "jitter": 0.012},
@@ -58,7 +93,7 @@ BU_CONFIG = {
         },
     },
     "saude": {
-        "label": "Seguro Pet",
+        "label": "Seguro Pet", "label_en": "Pet Insurance",
         "metrics": {
             "conv_cotacao": {"label": "Taxa de conversão da cotação", "type": "proporcao", "direction": "up", "base": 0.061, "jitter": 0.018},
             "churn_apolice": {"label": "Churn de apólices", "type": "proporcao", "direction": "down", "base": 0.033, "jitter": 0.009},
@@ -66,7 +101,7 @@ BU_CONFIG = {
         },
     },
     "servicos": {
-        "label": "Serviços (banho, tosa, vet)",
+        "label": "Serviços (banho, tosa, vet)", "label_en": "Services (bath, grooming, vet)",
         "metrics": {
             "conv_agendamento": {"label": "Taxa de conversão do agendamento", "type": "proporcao", "direction": "up", "base": 0.091, "jitter": 0.02},
             "ticket_servico": {"label": "Ticket médio do serviço", "type": "media", "direction": "up", "unit": "R$", "base": 92.0, "jitter": 16.0, "sd": 30.0},
@@ -81,7 +116,23 @@ GUARDRAILS_BY_BU = {
     "servicos": ["Custo por agendamento", "Taxa de no-show"],
 }
 
-REGIAO_FACTOR = {"Nacional": 1.0, "Sudeste": 0.42, "Sul": 0.16, "Nordeste": 0.2, "Centro-Oeste": 0.1, "Norte": 0.08}
+REGIAO_FACTOR = {"Nacional": 1.0, "Sudeste": 0.42, "Sul": 0.16, "Nordeste": 0.2, "Centro-Oeste": 0.1, "Norte": 0.08,
+                 # o mesmo cadastro digitado no DaVinci em ingles
+                 "Nationwide": 1.0, "National": 1.0, "Southeast": 0.42, "South": 0.16, "Northeast": 0.2,
+                 "Center-West": 0.1, "Midwest": 0.1, "North": 0.08}
+
+# Nomes dos guardrails na tela em ingles (o dado continua em portugues)
+GUARDRAILS_EN = {
+    "Custo por cliente": "Cost per customer", "Tempo médio de checkout": "Average checkout time",
+    "Custo por assinante": "Cost per subscriber", "NPS do onboarding": "Onboarding NPS",
+    "Custo por apólice emitida": "Cost per policy issued", "Tempo médio de cotação": "Average quote time",
+    "Custo por agendamento": "Cost per booking", "Taxa de no-show": "No-show rate",
+    "Custo por conversão": "Cost per conversion", "Tempo médio da etapa": "Average step time",
+}
+
+
+def nome_guardrail(nome: str) -> str:
+    return GUARDRAILS_EN.get(nome, nome) if idioma() == "en" else nome
 PLATAFORMA_TRAFFIC = {"App": 1250.0, "Web mobile": 980.0, "Web desktop": 480.0}  # usuários únicos/dia (não sessões)
 
 NSIM = 3000
@@ -297,28 +348,38 @@ def computar(test: dict, metric_cfg: dict, periodo: int, variante: str) -> Resul
 # ---------------------------------------------------------------------------
 
 def veredito(p_melhor: float, variante_label: str) -> dict:
-    pct = f"{p_melhor * 100:.1f}".replace(".", ",")
-    pct_inv = f"{(1 - p_melhor) * 100:.1f}".replace(".", ",")
+    pct = _dec(f"{p_melhor * 100:.1f}")
+    pct_inv = _dec(f"{(1 - p_melhor) * 100:.1f}")
+    L = _L
 
     if p_melhor >= 0.95:
         return {"classe": "good", "icone": "✅",
-                "titulo": f"Funcionou! A {variante_label} é melhor que o Controle.",
-                "sub": f"De cada 100 vezes que a gente pudesse repetir esse teste, a Variante venceria em cerca de {pct} delas. É uma vitória bem clara — dá pra confiar e aplicar a mudança."}
+                "titulo": L(f"Funcionou! A {variante_label} é melhor que o Controle.",
+                            f"It worked! {variante_label} is better than the Control."),
+                "sub": L(f"De cada 100 vezes que a gente pudesse repetir esse teste, a Variante venceria em cerca de {pct} delas. É uma vitória bem clara — dá pra confiar e aplicar a mudança.",
+                         f"Out of every 100 times we could repeat this test, the Variant would win about {pct} of them. It's a very clear win — you can trust it and roll out the change.")}
     if p_melhor <= 0.05:
         return {"classe": "bad", "icone": "❌",
-                "titulo": f"Não funcionou — o Controle continua melhor que a {variante_label}.",
-                "sub": f"De cada 100 vezes, o Controle venceria em cerca de {pct_inv} delas. A ideia nova não performou bem: melhor não aplicar essa mudança do jeito que está."}
+                "titulo": L(f"Não funcionou — o Controle continua melhor que a {variante_label}.",
+                            f"It didn't work — the Control is still better than {variante_label}."),
+                "sub": L(f"De cada 100 vezes, o Controle venceria em cerca de {pct_inv} delas. A ideia nova não performou bem: melhor não aplicar essa mudança do jeito que está.",
+                         f"Out of every 100 times, the Control would win about {pct_inv} of them. The new idea didn't perform well: better not to roll out this change as it is.")}
     if p_melhor >= 0.80:
         return {"classe": "mid", "icone": "🙂",
-                "titulo": "Parece que sim, mas ainda não é 100% certeza.",
-                "sub": f"A {variante_label} está na frente em {pct}% das simulações — um sinal bem positivo, mas ainda dá pra imaginar um cenário em que o Controle vence. Se der, vale rodar por mais alguns dias antes de decidir."}
+                "titulo": L("Parece que sim, mas ainda não é 100% certeza.",
+                            "Looks like yes, but it's not 100% certain yet."),
+                "sub": L(f"A {variante_label} está na frente em {pct}% das simulações — um sinal bem positivo, mas ainda dá pra imaginar um cenário em que o Controle vence. Se der, vale rodar por mais alguns dias antes de decidir.",
+                         f"{variante_label} is ahead in {pct}% of the simulations — a very positive sign, but you can still imagine a scenario where the Control wins. If you can, run it a few more days before deciding.")}
     if p_melhor <= 0.20:
         return {"classe": "mid", "icone": "🙁",
-                "titulo": "Parece que não, mas ainda não é 100% certeza.",
-                "sub": f"O Controle está na frente em {pct_inv}% das simulações. É um sinal de que a mudança não ajudou, mas o teste ainda não fechou — rodar mais alguns dias deixaria a resposta mais firme."}
+                "titulo": L("Parece que não, mas ainda não é 100% certeza.",
+                            "Looks like no, but it's not 100% certain yet."),
+                "sub": L(f"O Controle está na frente em {pct_inv}% das simulações. É um sinal de que a mudança não ajudou, mas o teste ainda não fechou — rodar mais alguns dias deixaria a resposta mais firme.",
+                         f"The Control is ahead in {pct_inv}% of the simulations. It's a sign the change didn't help, but the test isn't closed yet — running a few more days would make the answer firmer.")}
     return {"classe": "none", "icone": "🤔",
-            "titulo": "Ainda não dá pra saber quem é melhor.",
-            "sub": f"A chance de vitória está bem dividida ({pct}% Variante × {pct_inv}% Controle) — os dados ainda não mostram diferença clara entre os dois. Vale esperar mais dados chegarem antes de decidir."}
+            "titulo": L("Ainda não dá pra saber quem é melhor.", "It's not possible to tell which is better yet."),
+            "sub": L(f"A chance de vitória está bem dividida ({pct}% Variante × {pct_inv}% Controle) — os dados ainda não mostram diferença clara entre os dois. Vale esperar mais dados chegarem antes de decidir.",
+                     f"The chance of winning is evenly split ({pct}% Variant × {pct_inv}% Control) — the data doesn't show a clear difference between the two yet. It's worth waiting for more data before deciding.")}
 
 
 # ---------------------------------------------------------------------------
@@ -326,12 +387,24 @@ def veredito(p_melhor: float, variante_label: str) -> dict:
 # ---------------------------------------------------------------------------
 
 CHECKLIST_ITEMS = [
-    {"key": "srm", "title": "A divisão entre os grupos ficou mesmo igual?", "tech": "randomização / SRM"},
-    {"key": "crossover", "title": "Alguém viu as duas versões, sem querer?", "tech": "crossover"},
-    {"key": "dup", "title": "Tem gente contada duas vezes, ou faltando informação?", "tech": "duplicidade / nulos"},
-    {"key": "novelty", "title": "A melhora continuou, ou foi só nos primeiros dias?", "tech": "efeito novidade"},
-    {"key": "guard", "title": "As métricas que não podiam piorar continuam OK?", "tech": "guardrails"},
+    {"key": "srm", "title": "A divisão entre os grupos ficou mesmo igual?", "tech": "randomização / SRM",
+     "title_en": "Was the split between the groups really even?", "tech_en": "randomization / SRM"},
+    {"key": "crossover", "title": "Alguém viu as duas versões, sem querer?", "tech": "crossover",
+     "title_en": "Did anyone see both versions by accident?", "tech_en": "crossover"},
+    {"key": "dup", "title": "Tem gente contada duas vezes, ou faltando informação?", "tech": "duplicidade / nulos",
+     "title_en": "Is anyone counted twice, or is information missing?", "tech_en": "duplicates / nulls"},
+    {"key": "novelty", "title": "A melhora continuou, ou foi só nos primeiros dias?", "tech": "efeito novidade",
+     "title_en": "Did the improvement last, or was it only in the first days?", "tech_en": "novelty effect"},
+    {"key": "guard", "title": "As métricas que não podiam piorar continuam OK?", "tech": "guardrails",
+     "title_en": "Are the metrics that couldn't get worse still OK?", "tech_en": "guardrails"},
 ]
+
+
+def item_checklist(item: dict) -> tuple[str, str]:
+    """(titulo, nome tecnico) do item na lingua ativa."""
+    if idioma() == "en":
+        return item["title_en"], item["tech_en"]
+    return item["title"], item["tech"]
 
 
 def calcular_metades(r: ResultadoMedicao) -> dict:
@@ -351,28 +424,38 @@ def calcular_metades(r: ResultadoMedicao) -> dict:
 
 
 def fmt_pct_signed(value: float, casas: int = 1) -> str:
-    s = f"{value * 100:.{casas}f}".replace(".", ",")
+    s = _dec(f"{value * 100:.{casas}f}")
     return ("+" if value >= 0 else "") + s + "%"
 
 
 def checklist_hints(r: ResultadoMedicao) -> dict:
     split_total = r.dados.sess_c + r.dados.sess_v
-    split_c_pct = f"{r.dados.sess_c / split_total * 100:.1f}".replace(".", ",")
-    split_v_pct = f"{r.dados.sess_v / split_total * 100:.1f}".replace(".", ",")
+    split_c_pct = _dec(f"{r.dados.sess_c / split_total * 100:.1f}")
+    split_v_pct = _dec(f"{r.dados.sess_v / split_total * 100:.1f}")
     halves = calcular_metades(r)
     half1 = fmt_pct_signed(halves["lift1"])
     half2 = fmt_pct_signed(halves["lift2"])
     mesma_direcao = (halves["lift1"] >= 0) == (halves["lift2"] >= 0)
+    L = _L
     guard_text = (
-        f"{r.guardrail_risco} de {r.guardrail_total} guardrail(s) em atenção nesse recorte — vale olhar antes de aplicar."
-        if r.guardrail_risco > 0 else "nenhum guardrail em atenção nesse recorte."
+        L(f"{r.guardrail_risco} de {r.guardrail_total} guardrail(s) em atenção nesse recorte — vale olhar antes de aplicar.",
+          f"{r.guardrail_risco} of {r.guardrail_total} guardrail(s) flagged in this cut — worth a look before rolling out.")
+        if r.guardrail_risco > 0 else L("nenhum guardrail em atenção nesse recorte.", "no guardrail flagged in this cut.")
     )
     return {
-        "srm": f"Nesse recorte: <strong>{split_c_pct}%</strong> controle × <strong>{split_v_pct}%</strong> variante — em usuários únicos, não em sessões. Numa randomização saudável, isso fica pertinho de 50/50; bem diferente disso é sinal de gente sendo jogada pro grupo errado.",
-        "crossover": "Ex.: o cliente trocou de aparelho ou limpou o cookie e caiu no outro grupo no meio do teste. Isso faz um usuário só contar como se fosse dois, e mistura os dois resultados.",
-        "dup": "Confira se o mesmo usuário não entrou duas vezes na conta e se não tem usuário sem grupo definido (nulo) entrando sem querer. É por isso que o Michelangelo mede por usuário único, e não por sessão: sessão repetida do mesmo usuário infla a amostra e engana a conta de erro.",
-        "novelty": f"Nesse recorte: lift foi de <strong>{half1}</strong> na 1ª metade do período e <strong>{half2}</strong> na 2ª metade" + (" — direção se manteve." if mesma_direcao else " — mudou de direção, vale desconfiar.") + " Efeito que só aparece no começo costuma ser curiosidade, não melhora de verdade.",
-        "guard": f"Nesse recorte: {guard_text}",
+        "srm": L(f"Nesse recorte: <strong>{split_c_pct}%</strong> controle × <strong>{split_v_pct}%</strong> variante — em usuários únicos, não em sessões. Numa randomização saudável, isso fica pertinho de 50/50; bem diferente disso é sinal de gente sendo jogada pro grupo errado.",
+                 f"In this cut: <strong>{split_c_pct}%</strong> control × <strong>{split_v_pct}%</strong> variant — in unique users, not sessions. In a healthy randomization this stays very close to 50/50; far from that is a sign of people being sent to the wrong group."),
+        "crossover": L("Ex.: o cliente trocou de aparelho ou limpou o cookie e caiu no outro grupo no meio do teste. Isso faz um usuário só contar como se fosse dois, e mistura os dois resultados.",
+                       "E.g.: the customer switched devices or cleared cookies and landed in the other group mid-test. That makes one user count as two, and mixes the two results."),
+        "dup": L("Confira se o mesmo usuário não entrou duas vezes na conta e se não tem usuário sem grupo definido (nulo) entrando sem querer. É por isso que o Michelangelo mede por usuário único, e não por sessão: sessão repetida do mesmo usuário infla a amostra e engana a conta de erro.",
+                 "Check that the same user wasn't counted twice and that no user without an assigned group (null) slipped in. That's why Michelangelo measures by unique user, not by session: repeat sessions from the same user inflate the sample and fool the error calculation."),
+        "novelty": (L(f"Nesse recorte: lift foi de <strong>{half1}</strong> na 1ª metade do período e <strong>{half2}</strong> na 2ª metade",
+                      f"In this cut: lift was <strong>{half1}</strong> in the 1st half of the period and <strong>{half2}</strong> in the 2nd half")
+                    + (L(" — direção se manteve.", " — the direction held.") if mesma_direcao
+                       else L(" — mudou de direção, vale desconfiar.", " — it changed direction, worth being suspicious."))
+                    + L(" Efeito que só aparece no começo costuma ser curiosidade, não melhora de verdade.",
+                        " An effect that only shows up at the start is usually curiosity, not a real improvement.")),
+        "guard": L(f"Nesse recorte: {guard_text}", f"In this cut: {guard_text}"),
     }
 
 
@@ -416,41 +499,46 @@ def opcoes_decisao(r: ResultadoMedicao, status: dict) -> list:
     strong_already = strength >= 0.95
     extra = status["extra_days_needed"]
     quick_extension = extra is not None and extra <= 7
-    target_fmt = f"{status['target']:,}".replace(",", ".")
-    extra_fmt = f"~{extra:,}".replace(",", ".") + " dia(s)" if extra is not None else "alguns dias"
+    target_fmt = fmt_int(status['target'])
+    L = _L
+    extra_fmt = (f"~{fmt_int(extra)} {L('dia(s)', 'day(s)')}" if extra is not None
+                 else L("alguns dias", "a few days"))
 
     return [
         {
-            "titulo": "⏳ Prorrogar o teste",
-            "desc": f"Continuar rodando por mais {extra_fmt} até bater a meta de {target_fmt} usuários por grupo. Mais seguro, mas atrasa a decisão — e, se a mudança for boa, adia o ganho.",
+            "titulo": L("⏳ Prorrogar o teste", "⏳ Extend the test"),
+            "desc": L(f"Continuar rodando por mais {extra_fmt} até bater a meta de {target_fmt} usuários por grupo. Mais seguro, mas atrasa a decisão — e, se a mudança for boa, adia o ganho.",
+                      f"Keep running for another {extra_fmt} until hitting the target of {target_fmt} users per group. Safer, but it delays the decision — and, if the change is good, it postpones the gain."),
             "recomendado": (not strong_already) and quick_extension,
         },
         {
-            "titulo": "⚠️ Parar e aceitar menos confiança",
-            "desc": "Decidir com a amostra de hoje, sabendo que o intervalo de credibilidade fica mais largo e a chance de decisão errada é maior. Só faz sentido se a evidência já estiver bem forte ou a decisão não for crítica.",
+            "titulo": L("⚠️ Parar e aceitar menos confiança", "⚠️ Stop and accept less confidence"),
+            "desc": L("Decidir com a amostra de hoje, sabendo que o intervalo de credibilidade fica mais largo e a chance de decisão errada é maior. Só faz sentido se a evidência já estiver bem forte ou a decisão não for crítica.",
+                      "Decide with today's sample, knowing the credible interval is wider and the chance of a wrong decision is higher. It only makes sense if the evidence is already very strong or the decision isn't critical."),
             "recomendado": strong_already,
         },
         {
-            "titulo": "🛑 Parar sem decidir (inconclusivo)",
-            "desc": "Encerrar o teste sem aplicar a mudança agora. Vale quando faltaria muito tempo pra bater a meta — melhor revisar o desenho lá no DaVinci (tráfego esperado, duração) antes de tentar de novo.",
+            "titulo": L("🛑 Parar sem decidir (inconclusivo)", "🛑 Stop without deciding (inconclusive)"),
+            "desc": L("Encerrar o teste sem aplicar a mudança agora. Vale quando faltaria muito tempo pra bater a meta — melhor revisar o desenho lá no DaVinci (tráfego esperado, duração) antes de tentar de novo.",
+                      "End the test without rolling out the change now. Worth it when hitting the target would take too long — better to review the design in DaVinci (expected traffic, duration) before trying again."),
             "recomendado": (not strong_already) and (not quick_extension),
         },
     ]
 
 
 # ---------------------------------------------------------------------------
-# 7. Formatação (padrão pt-BR)
+# 7. Formatação (1.234,5 em portugues · 1,234.5 em ingles)
 # ---------------------------------------------------------------------------
 
 def fmt_metric(value: float, cfg: dict) -> str:
     if cfg["type"] == "proporcao":
-        return f"{value * 100:.2f}".replace(".", ",") + "%"
+        return _dec(f"{value * 100:.2f}") + "%"
     if cfg.get("unit") == "%":
-        return f"{value:.1f}".replace(".", ",") + "%"
+        return _dec(f"{value:.1f}") + "%"
     if cfg.get("unit") == "R$":
-        return "R$ " + f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return "R$ " + _milhar(f"{value:,.2f}")
+    return _milhar(f"{value:,.2f}")
 
 
 def fmt_int(value: float) -> str:
-    return f"{round(value):,}".replace(",", ".")
+    return _milhar(f"{round(value):,}")
