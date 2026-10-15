@@ -12,7 +12,11 @@ Escopo:
       * "proporcao" -- Beta-Binomial (conjugado): posterior = Beta(1+conversoes, 1+nao-conversoes);
       * "media"     -- Normal (aproximacao via erro padrao da media diaria).
   - Monte Carlo (3000 simulacoes) para estimar P(variante > controle), lift
-    esperado e intervalo de credibilidade 90%;
+    esperado, intervalo de credibilidade 90% e PERDA ESPERADA (quanto se
+    perde, em media, se a escolha estiver errada);
+  - testes com 3 grupos ou mais (A/B/n): chance de cada grupo ser o melhor
+    de todos, com o mesmo controle em todas as comparacoes;
+  - SRM com teste qui-quadrado de verdade (p-valor), nao so o % de cada grupo;
   - checklist de contaminacao (SRM, crossover, duplicidade/nulos, efeito
     novidade, guardrails) e apoio a decisao quando a amostra planejada no
     DaVinci ainda nao foi atingida (prorrogar / aceitar menos confianca /
@@ -200,23 +204,42 @@ class DadosGerados:
     soma_sq_v: float
 
 
-def gerar_dados(test: dict, metric_cfg: dict, periodo: int, rng: random.Random) -> DadosGerados:
+def gerar_dados(test: dict, metric_cfg: dict, periodo: int, rng: random.Random,
+                rng_controle: random.Random | None = None) -> DadosGerados:
+    """
+    Gera os dados diarios de controle x uma variante.
+
+    O CONTROLE sai de um gerador proprio (`rng_controle`), que nao depende de
+    qual variante esta sendo comparada -- assim, num teste com 3 grupos ou
+    mais, o Grupo A e exatamente o mesmo em todas as comparacoes (como seria
+    na vida real). A variante usa o gerador dela (`rng`).
+
+    Trafego: cada dia tem um volume base comum a todos os grupos; cada grupo
+    recebe esse volume +- ruido de sorteio (~ raiz do volume, como numa
+    randomizacao de verdade). Em ~16% dos cenarios a variante recebe 6-13% a
+    mais ou a menos de proposito, pra alimentar o teste de SRM.
+    """
+    if rng_controle is None:
+        rng_controle = make_rng(seed_key(test["id"], periodo, "controle"))
+    rc = rng_controle
+
     regiao_factor = REGIAO_FACTOR.get(test["regiao"], 1.0)
-    device_factor = 0.92 + rng.random() * 0.16
+    device_factor = 0.92 + rc.random() * 0.16
     base_traffic = PLATAFORMA_TRAFFIC.get(test["plataforma"], 800.0) * regiao_factor * device_factor
 
-    # leve chance de desbalanceamento proposital, pra alimentar o aviso de SRM
+    baseline_jitter = (rc.random() - 0.5) * 2 * metric_cfg["jitter"]
+    baseline_value = metric_cfg["base"] + baseline_jitter
+    if metric_cfg["type"] == "proporcao":
+        baseline_value = min(0.95, max(0.005, baseline_value))
+    ruido_dia = [1 + (rc.random() - 0.5) * 0.22 for _ in range(periodo)]
+
+    # desbalanceamento proposital (SRM) -- so na variante
     srm_skew = 1.0
     if rng.random() < 0.16:
         sinal = 1 if rng.random() < 0.5 else -1
         srm_skew = 1 + (0.06 + rng.random() * 0.07) * sinal
 
-    baseline_jitter = (rng.random() - 0.5) * 2 * metric_cfg["jitter"]
-    baseline_value = metric_cfg["base"] + baseline_jitter
-    if metric_cfg["type"] == "proporcao":
-        baseline_value = min(0.95, max(0.005, baseline_value))
-
-    # efeito real embutido no cenário: viés levemente positivo (empresa testando pra melhorar)
+    # efeito real embutido no cenario: vies levemente positivo (empresa testando pra melhorar)
     true_rel_lift = rng.random() * 0.30 - 0.08  # -8% a +22%
     if metric_cfg["direction"] == "down":
         variant_true_value = baseline_value * (1 - true_rel_lift)
@@ -230,15 +253,15 @@ def gerar_dados(test: dict, metric_cfg: dict, periodo: int, rng: random.Random) 
     soma_c = soma_v = soma_sq_c = soma_sq_v = 0.0
 
     for d in range(periodo):
-        day_noise_c = 1 + (rng.random() - 0.5) * 0.22
-        day_noise_v = 1 + (rng.random() - 0.5) * 0.22
-        s_c = round(base_traffic * day_noise_c * (srm_skew if srm_skew > 1 else 1))
-        s_v = round(base_traffic * day_noise_v * ((2 - srm_skew) if srm_skew < 1 else 1))
+        vol = base_traffic * ruido_dia[d]
+        vol_v = vol * srm_skew
+        s_c = max(1, round(vol + rc.gauss(0, math.sqrt(vol))))
+        s_v = max(1, round(vol_v + rng.gauss(0, math.sqrt(vol_v))))
         sess_c += s_c
         sess_v += s_v
 
         if metric_cfg["type"] == "proporcao":
-            r_c = min(0.99, max(0.001, baseline_value * (1 + (rng.random() - 0.5) * 0.18)))
+            r_c = min(0.99, max(0.001, baseline_value * (1 + (rc.random() - 0.5) * 0.18)))
             r_v = min(0.99, max(0.001, variant_true_value * (1 + (rng.random() - 0.5) * 0.18)))
             c_c = round(s_c * r_c)
             c_v = round(s_v * r_v)
@@ -246,7 +269,7 @@ def gerar_dados(test: dict, metric_cfg: dict, periodo: int, rng: random.Random) 
             conv_v += c_v
             dias.append(DiaMedicao(d, r_c, s_c, r_v, s_v))
         else:
-            m_c = baseline_value * (1 + (rng.random() - 0.5) * 0.14)
+            m_c = baseline_value * (1 + (rc.random() - 0.5) * 0.14)
             m_v = variant_true_value * (1 + (rng.random() - 0.5) * 0.14)
             soma_c += m_c
             soma_v += m_v
@@ -289,45 +312,55 @@ class ResultadoMedicao:
     rng: random.Random
     guardrail_risco: int = 0
     guardrail_total: int = 0
+    # perda esperada (relativa ao controle): quanto se perde, em media, se a
+    # escolha estiver errada. perda_variante = risco de aplicar a variante;
+    # perda_controle = risco de ficar com o controle.
+    perda_variante: float = 0.0
+    perda_controle: float = 0.0
+    sims_controle: list = field(default_factory=list, repr=False)
+    sims_variante: list = field(default_factory=list, repr=False)
+
+
+def _sortear_posterior(metric_cfg: dict, n_conv: int, n_sess: int, soma: float, soma_sq: float,
+                       periodo: int, rng: random.Random) -> tuple[Posterior, list]:
+    """Posterior de UM grupo + NSIM sorteios dele."""
+    if metric_cfg["type"] == "proporcao":
+        a, b = 1 + n_conv, 1 + (n_sess - n_conv)
+        sims = [rng.betavariate(a, b) for _ in range(NSIM)]
+        return Posterior("proporcao", a / (a + b), n_conv / n_sess, a, b), sims
+    mean = soma / periodo
+    sd = math.sqrt(max(1e-6, soma_sq / periodo - mean ** 2)) or metric_cfg["sd"]
+    se = max(sd / math.sqrt(periodo), mean * 0.01)
+    sims = [rng.gauss(mean, se) for _ in range(NSIM)]
+    return Posterior("media", mean, mean, se=se), sims
 
 
 def computar(test: dict, metric_cfg: dict, periodo: int, variante: str) -> ResultadoMedicao:
     rng = make_rng(seed_key(test["id"], periodo, variante))
-    dados = gerar_dados(test, metric_cfg, periodo, rng)
+    rng_c = make_rng(seed_key(test["id"], periodo, "controle"))
+    dados = gerar_dados(test, metric_cfg, periodo, rng, rng_c)
 
-    sims_c = [0.0] * NSIM
-    sims_v = [0.0] * NSIM
+    # o controle tem sorteios proprios (mesmos em qualquer comparacao)
+    rng_sim_c = make_rng(seed_key(test["id"], periodo, "sim|controle"))
+    post_c, sims_c = _sortear_posterior(metric_cfg, dados.conv_c, dados.sess_c, dados.soma_c,
+                                        dados.soma_sq_c, periodo, rng_sim_c)
+    post_v, sims_v = _sortear_posterior(metric_cfg, dados.conv_v, dados.sess_v, dados.soma_v,
+                                        dados.soma_sq_v, periodo, rng)
 
-    if metric_cfg["type"] == "proporcao":
-        alpha_c, beta_c = 1 + dados.conv_c, 1 + (dados.sess_c - dados.conv_c)
-        alpha_v, beta_v = 1 + dados.conv_v, 1 + (dados.sess_v - dados.conv_v)
-        for i in range(NSIM):
-            sims_c[i] = rng.betavariate(alpha_c, beta_c)
-            sims_v[i] = rng.betavariate(alpha_v, beta_v)
-        post_c = Posterior("proporcao", alpha_c / (alpha_c + beta_c), dados.conv_c / dados.sess_c, alpha_c, beta_c)
-        post_v = Posterior("proporcao", alpha_v / (alpha_v + beta_v), dados.conv_v / dados.sess_v, alpha_v, beta_v)
-    else:
-        mean_c, mean_v = dados.soma_c / periodo, dados.soma_v / periodo
-        sd_c = math.sqrt(max(1e-6, dados.soma_sq_c / periodo - mean_c ** 2)) or metric_cfg["sd"]
-        sd_v = math.sqrt(max(1e-6, dados.soma_sq_v / periodo - mean_v ** 2)) or metric_cfg["sd"]
-        se_c = max(sd_c / math.sqrt(periodo), mean_c * 0.01)
-        se_v = max(sd_v / math.sqrt(periodo), mean_v * 0.01)
-        for i in range(NSIM):
-            sims_c[i] = rng.gauss(mean_c, se_c)
-            sims_v[i] = rng.gauss(mean_v, se_v)
-        post_c = Posterior("media", mean_c, mean_c, se=se_c)
-        post_v = Posterior("media", mean_v, mean_v, se=se_v)
-
+    desce = metric_cfg["direction"] == "down"
     wins_variant = 0
     lifts = [0.0] * NSIM
-    exemplo_lift = None
+    perda_v = perda_c = 0.0
     for i in range(NSIM):
-        melhor = sims_v[i] < sims_c[i] if metric_cfg["direction"] == "down" else sims_v[i] > sims_c[i]
-        if melhor:
+        c, v = sims_c[i], sims_v[i]
+        if (v < c) if desce else (v > c):
             wins_variant += 1
-        lifts[i] = (sims_v[i] - sims_c[i]) / max(1e-9, sims_c[i])
-        if i == 0:
-            exemplo_lift = lifts[i]
+        lifts[i] = (v - c) / max(1e-9, c)
+        # ganho da variante na direcao "boa" (positivo = variante melhor)
+        ganho = -lifts[i] if desce else lifts[i]
+        perda_v += max(-ganho, 0.0)
+        perda_c += max(ganho, 0.0)
+    exemplo_lift = lifts[0]
     lifts_sorted = sorted(lifts)
     p_melhor = wins_variant / NSIM
     lift_medio = sum(lifts) / NSIM
@@ -339,8 +372,159 @@ def computar(test: dict, metric_cfg: dict, periodo: int, variante: str) -> Resul
         post_controle=post_c, post_variante=post_v,
         p_melhor=p_melhor, lift_medio=lift_medio, ci_baixo=ci_baixo, ci_alto=ci_alto,
         nsim=NSIM, exemplo_controle=sims_c[0], exemplo_variante=sims_v[0], exemplo_lift=exemplo_lift,
-        rng=rng,
+        rng=rng, perda_variante=perda_v / NSIM, perda_controle=perda_c / NSIM,
+        sims_controle=sims_c, sims_variante=sims_v,
     )
+
+
+# ---------------------------------------------------------------------------
+# 3b. Perda esperada -- regra de decisao
+# ---------------------------------------------------------------------------
+# "Chance de ser melhor" sozinha nao diz quanto custa errar. A perda esperada
+# responde: se eu aplicar a variante e ela for na verdade pior, quanto eu
+# perco em media (em % do controle)? Regra comum: aplica quando essa perda
+# fica abaixo de um limite que o negocio topa perder (o "limite de
+# tolerancia", ex.: 0,1% do resultado).
+
+LIMITE_PERDA_PADRAO = 0.001  # 0,1% do controle
+
+
+def decisao_por_perda(r: ResultadoMedicao, limite: float = LIMITE_PERDA_PADRAO) -> str:
+    """'variante' | 'controle' | 'esperar' pela regra da perda esperada."""
+    if r.perda_variante <= limite and r.perda_variante <= r.perda_controle:
+        return "variante"
+    if r.perda_controle <= limite and r.perda_controle < r.perda_variante:
+        return "controle"
+    return "esperar"
+
+
+# ---------------------------------------------------------------------------
+# 3c. SRM -- teste qui-quadrado da divisao entre grupos
+# ---------------------------------------------------------------------------
+# Se o plano era dividir igual e os usuarios nao chegaram iguais, alguma
+# coisa na randomizacao (ou no registro) quebrou. O teste compara o que
+# chegou com o que se esperava; p-valor abaixo de 0,001 e o corte usual
+# (rigido de proposito: com amostra grande, diferenca pequena ja acende).
+
+LIMIAR_SRM = 0.001
+
+
+def _gamma_inc_sup_reg(a: float, x: float) -> float:
+    """Q(a, x): funcao gama incompleta superior regularizada (Numerical Recipes)."""
+    if x <= 0:
+        return 1.0
+    gln = math.lgamma(a)
+    if x < a + 1:  # serie para P, depois 1 - P
+        ap, soma, termo = a, 1.0 / a, 1.0 / a
+        for _ in range(1000):
+            ap += 1
+            termo *= x / ap
+            soma += termo
+            if abs(termo) < abs(soma) * 1e-15:
+                break
+        return max(0.0, 1.0 - soma * math.exp(-x + a * math.log(x) - gln))
+    # fracao continuada para Q (Lentz)
+    tiny = 1e-300
+    b = x + 1 - a
+    c = 1 / tiny
+    d = 1 / b
+    h = d
+    for i in range(1, 1000):
+        an = -i * (i - a)
+        b += 2
+        d = an * d + b
+        d = tiny if abs(d) < tiny else d
+        c = b + an / c
+        c = tiny if abs(c) < tiny else c
+        d = 1 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1) < 1e-15:
+            break
+    return math.exp(-x + a * math.log(x) - gln) * h
+
+
+def qui2_p_valor(estatistica: float, graus: int) -> float:
+    """P(Qui2(graus) >= estatistica)."""
+    return _gamma_inc_sup_reg(graus / 2, estatistica / 2)
+
+
+def srm_teste(contagens: list, proporcoes: list | None = None) -> dict:
+    """
+    Teste de SRM (sample ratio mismatch) para k grupos.
+    contagens: usuarios unicos em cada grupo, controle primeiro.
+    proporcoes: divisao planejada (padrao: igual entre os grupos).
+    """
+    k = len(contagens)
+    total = sum(contagens)
+    if proporcoes is None:
+        proporcoes = [1 / k] * k
+    esperados = [total * p for p in proporcoes]
+    estat = sum((o - e) ** 2 / e for o, e in zip(contagens, esperados) if e > 0)
+    p = qui2_p_valor(estat, k - 1)
+    return {
+        "qui2": estat, "graus": k - 1, "p_valor": p, "alerta": p < LIMIAR_SRM,
+        "pcts": [c / total for c in contagens] if total else [0.0] * k,
+    }
+
+
+def fmt_p_valor(p: float) -> str:
+    if p < 0.0001:
+        return "< " + _dec("0.0001")
+    return _dec(f"{p:.4f}")
+
+
+# ---------------------------------------------------------------------------
+# 3d. Todos os grupos juntos (A/B/n)
+# ---------------------------------------------------------------------------
+
+def computar_multibraco(test: dict, metric_cfg: dict, periodo: int) -> dict:
+    """
+    Com 3 grupos ou mais: em cada uma das NSIM simulacoes, ve qual grupo
+    (controle incluido) teve o melhor valor. A fracao de vitorias e a chance
+    de cada grupo ser O MELHOR de todos. A perda esperada de cada grupo e a
+    distancia media (em % do controle) ate o melhor grupo daquela simulacao.
+
+    O controle e o mesmo em todas as comparacoes (mesmo gerador e mesmos
+    sorteios), entao os numeros batem com a tela de comparacao 1 a 1.
+    """
+    variantes = list(test["variantes"])
+    resultados = {v: computar(test, metric_cfg, periodo, v) for v in variantes}
+    primeiro = resultados[variantes[0]]
+    nomes = ["A"] + variantes
+    sims = [primeiro.sims_controle] + [resultados[v].sims_variante for v in variantes]
+    desce = metric_cfg["direction"] == "down"
+
+    vitorias = [0] * len(nomes)
+    perdas = [0.0] * len(nomes)
+    for i in range(NSIM):
+        valores = [s[i] for s in sims]
+        melhor = min(valores) if desce else max(valores)
+        idx = valores.index(melhor)
+        vitorias[idx] += 1
+        ref = max(1e-9, valores[0])
+        for g, val in enumerate(valores):
+            perdas[g] += abs(melhor - val) / ref
+
+    grupos = []
+    for g, nome in enumerate(nomes):
+        if g == 0:
+            post, n_usu = primeiro.post_controle, primeiro.dados.sess_c
+            r_g = None
+        else:
+            r_g = resultados[nome]
+            post, n_usu = r_g.post_variante, r_g.dados.sess_v
+        grupos.append({
+            "grupo": nome, "controle": g == 0, "usuarios": n_usu,
+            "valor": post.summary_value,
+            "p_melhor_de_todos": vitorias[g] / NSIM,
+            "perda_esperada": perdas[g] / NSIM,
+            "p_melhor_que_controle": None if g == 0 else r_g.p_melhor,
+            "lift_medio": 0.0 if g == 0 else r_g.lift_medio,
+        })
+
+    srm = srm_teste([primeiro.dados.sess_c] + [resultados[v].dados.sess_v for v in variantes])
+    return {"grupos": grupos, "srm": srm, "resultados": resultados}
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +616,8 @@ def checklist_hints(r: ResultadoMedicao) -> dict:
     split_total = r.dados.sess_c + r.dados.sess_v
     split_c_pct = _dec(f"{r.dados.sess_c / split_total * 100:.1f}")
     split_v_pct = _dec(f"{r.dados.sess_v / split_total * 100:.1f}")
+    srm = srm_teste([r.dados.sess_c, r.dados.sess_v])
+    p_srm = fmt_p_valor(srm["p_valor"])
     halves = calcular_metades(r)
     half1 = fmt_pct_signed(halves["lift1"])
     half2 = fmt_pct_signed(halves["lift2"])
@@ -443,8 +629,16 @@ def checklist_hints(r: ResultadoMedicao) -> dict:
         if r.guardrail_risco > 0 else L("nenhum guardrail em atenção nesse recorte.", "no guardrail flagged in this cut.")
     )
     return {
-        "srm": L(f"Nesse recorte: <strong>{split_c_pct}%</strong> controle × <strong>{split_v_pct}%</strong> variante — em usuários únicos, não em sessões. Numa randomização saudável, isso fica pertinho de 50/50; bem diferente disso é sinal de gente sendo jogada pro grupo errado.",
-                 f"In this cut: <strong>{split_c_pct}%</strong> control × <strong>{split_v_pct}%</strong> variant — in unique users, not sessions. In a healthy randomization this stays very close to 50/50; far from that is a sign of people being sent to the wrong group."),
+        "srm": L(f"Nesse recorte: <strong>{split_c_pct}%</strong> controle × <strong>{split_v_pct}%</strong> variante — em usuários únicos, não em sessões. "
+                 f"Teste qui-quadrado: p-valor <strong>{p_srm}</strong> "
+                 + ("(abaixo de 0,001 → a divisão quebrou; não confie no resultado antes de achar a causa)." if srm["alerta"]
+                    else "(acima de 0,001 → diferença dentro do que o sorteio explica).")
+                 + " Numa randomização saudável, isso fica pertinho de 50/50; bem diferente disso é sinal de gente sendo jogada pro grupo errado.",
+                 f"In this cut: <strong>{split_c_pct}%</strong> control × <strong>{split_v_pct}%</strong> variant — in unique users, not sessions. "
+                 f"Chi-square test: p-value <strong>{p_srm}</strong> "
+                 + ("(below 0.001 → the split broke; don't trust the result before finding the cause)." if srm["alerta"]
+                    else "(above 0.001 → a difference that chance alone explains).")
+                 + " In a healthy randomization this stays very close to 50/50; far from that is a sign of people being sent to the wrong group."),
         "crossover": L("Ex.: o cliente trocou de aparelho ou limpou o cookie e caiu no outro grupo no meio do teste. Isso faz um usuário só contar como se fosse dois, e mistura os dois resultados.",
                        "E.g.: the customer switched devices or cleared cookies and landed in the other group mid-test. That makes one user count as two, and mixes the two results."),
         "dup": L("Confira se o mesmo usuário não entrou duas vezes na conta e se não tem usuário sem grupo definido (nulo) entrando sem querer. É por isso que o Michelangelo mede por usuário único, e não por sessão: sessão repetida do mesmo usuário infla a amostra e engana a conta de erro.",

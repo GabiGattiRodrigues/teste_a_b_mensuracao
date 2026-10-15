@@ -69,6 +69,16 @@ de verdade for salvo no DaVinci, ele substitui os exemplos automaticamente
 - **Simulação de Monte Carlo** (3.000 simulações) pra estimar a
   probabilidade de a variante ser melhor que o controle, o lift esperado
   e o intervalo de credibilidade (90%).
+- **Perda esperada** como regra de decisão: quanto se perde, em média, se
+  a escolha estiver errada. Você define quanto o negócio topa perder
+  (limite de tolerância) e o app diz se já dá pra aplicar, manter o
+  controle ou esperar mais dados.
+- **SRM com teste qui-quadrado**: além do % de cada grupo, o p-valor da
+  divisão (corte em 0,001). Com a divisão quebrada, o app não recomenda
+  decisão nenhuma até a causa ser achada.
+- **Testes com 3 grupos ou mais (A/B/n)**: chance de cada grupo ser o
+  melhor de todos e perda esperada de cada um, com o mesmo controle em
+  todas as comparações.
 - **Sempre por usuário único**, nunca por sessão — contar sessão repetida
   do mesmo usuário infla a amostra e faz o resultado parecer mais preciso
   do que é de verdade.
@@ -198,7 +208,9 @@ só para leitura.
 measures an A/B test that's already running, with Bayesian inference explained
 in plain language — Beta-Binomial for proportions, a normal approximation for
 averages, 3,000 Monte Carlo draws for the probability that the variant wins, the
-expected lift and a 90% credible interval. It also compares planned vs. observed
+expected lift and a 90% credible interval, plus expected loss as a decision rule
+(with a tolerance threshold), a chi-square SRM test, and an A/B/n view with each
+group's chance of being the best of all. It also compares planned vs. observed
 sample (with extend / accept-less-confidence / stop options when the target
 wasn't reached), a contamination checklist (SRM, crossover, duplicates, novelty,
 guardrails) and a saved measurement history. The test record (goal, metric,

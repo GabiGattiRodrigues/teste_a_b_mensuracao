@@ -513,10 +513,10 @@ st.markdown(
 )
 
 st.caption(L(
-    "Michelangelo compara duas variantes por vez. Com 3 grupos ou mais cadastrados no DaVinci, "
-    "ele ajusta a confiança sozinho (correção de Bonferroni) — aqui, sempre controle × 1 desafiante.",
-    "Michelangelo compares two variants at a time. With 3 or more groups registered in DaVinci, "
-    "it adjusts the confidence on its own (Bonferroni correction) — here, always control × 1 challenger."
+    "Aqui embaixo a comparação é sempre controle × 1 desafiante. Com 3 grupos ou mais cadastrados no "
+    "DaVinci, aparece também a seção \"Todos os grupos juntos\", com a chance de cada um ser o melhor.",
+    "Below, the comparison is always control × 1 challenger. With 3 or more groups registered in "
+    "DaVinci, an \"All groups together\" section also shows the chance of each one being the best."
 ))
 
 col_periodo, col_variante = st.columns(2)
@@ -674,19 +674,77 @@ st.caption(L(
     f"gets narrower with more people measured. The numbers behind it are in \"See the math\" below."
 ))
 
+# SRM calculado antes, pra decisao por perda esperada nao recomendar nada com a divisao quebrada
+_srm = m.srm_teste([r.dados.sess_c, r.dados.sess_v])
+
+# --- Perda esperada: quanto custa errar ---
+st.markdown(L("##### E se a gente escolher errado? (perda esperada)",
+              "##### What if we pick the wrong one? (expected loss)"))
+_perda_v = m._dec(f"{r.perda_variante * 100:.2f}") + "%"
+_perda_c = m._dec(f"{r.perda_controle * 100:.2f}") + "%"
+col_pv, col_pc = st.columns(2)
+col_pv.metric(L(f"Risco de aplicar a {variante_label}", f"Risk of rolling out {variante_label}"), _perda_v,
+              help=L("Se a variante for, na verdade, pior: quanto se perde em média, em % do resultado do controle.",
+                     "If the variant is actually worse: how much is lost on average, as % of the control's result."))
+col_pc.metric(L("Risco de ficar com o Controle", "Risk of keeping the Control"), _perda_c,
+              help=L("Se a variante for, na verdade, melhor: quanto se deixa de ganhar em média.",
+                     "If the variant is actually better: how much gain is left on the table on average."))
+_limite_pct = st.select_slider(
+    L("Quanto o negócio topa perder se errar? (limite de tolerância)",
+      "How much is the business willing to lose if wrong? (tolerance threshold)"),
+    options=[0.05, 0.1, 0.25, 0.5, 1.0], value=0.1, key=f"limite_perda_{test['id']}",
+    format_func=lambda x: m._dec(f"{x:g}") + "%",
+)
+_decisao = m.decisao_por_perda(r, _limite_pct / 100)
+_limite_fmt = m._dec(f"{_limite_pct:g}") + "%"
+if _srm["alerta"]:
+    st.markdown('<div class="banner warn">' + L(
+        '⚠️ A divisão dos grupos quebrou (SRM, logo abaixo). Enquanto a causa não for achada, nenhuma decisão por perda esperada vale: os números podem estar distorcidos.',
+        '⚠️ The group split broke (SRM, right below). Until the cause is found, no expected-loss decision holds: the numbers may be distorted.')
+        + '</div>', unsafe_allow_html=True)
+elif _decisao == "variante":
+    st.markdown('<div class="banner good">' + L(
+        f'✅ Pela perda esperada, dá pra aplicar a {variante_label}: se ela estiver errada, a perda média ({_perda_v}) fica abaixo do limite de {_limite_fmt}.',
+        f'✅ By expected loss, {variante_label} can be rolled out: if it\'s wrong, the average loss ({_perda_v}) stays below the {_limite_fmt} threshold.')
+        + '</div>', unsafe_allow_html=True)
+elif _decisao == "controle":
+    st.markdown('<div class="banner bad">' + L(
+        f'🛑 Pela perda esperada, fique com o Controle: deixar a {variante_label} de lado custa em média {_perda_c}, abaixo do limite de {_limite_fmt}.',
+        f'🛑 By expected loss, keep the Control: setting {variante_label} aside costs {_perda_c} on average, below the {_limite_fmt} threshold.')
+        + '</div>', unsafe_allow_html=True)
+else:
+    st.markdown('<div class="banner warn">' + L(
+        f'⏳ Ainda não: errar custaria mais que o limite de {_limite_fmt} pros dois lados. Mais dados diminuem esse risco.',
+        f'⏳ Not yet: being wrong would cost more than the {_limite_fmt} threshold either way. More data shrinks that risk.')
+        + '</div>', unsafe_allow_html=True)
+st.caption(L(
+    "A chance de ser melhor diz **quem** provavelmente ganha; a perda esperada diz **quanto custa** se a gente "
+    "estiver errado. Uma variante com 85% de chance mas perda minúscula pode já valer a pena; uma com 90% mas "
+    "risco de perder muito, não.",
+    "The chance of being better tells **who** probably wins; the expected loss tells **how much it costs** if "
+    "we're wrong. A variant with an 85% chance but a tiny loss may already be worth it; one with 90% but a "
+    "risk of losing a lot, not."
+))
+
+# --- SRM: teste qui-quadrado da divisao ---
 split_total = r.dados.sess_c + r.dados.sess_v
 split_c = r.dados.sess_c / split_total
-if abs(split_c - 0.5) > 0.035:
-    pct_c_fmt = m._dec(f"{split_c*100:.1f}")
-    pct_v_fmt = m._dec(f"{(1-split_c)*100:.1f}")
-    st.markdown('<div class="banner warn">' + L(
-        f'⚠️ Possível desbalanceamento na divisão dos grupos (SRM) — controle recebeu {pct_c_fmt}% dos usuários, variante {pct_v_fmt}%.',
-        f'⚠️ Possible imbalance in the group split (SRM) — control got {pct_c_fmt}% of users, variant {pct_v_fmt}%.')
+_p_srm = m.fmt_p_valor(_srm["p_valor"])
+pct_c_fmt = m._dec(f"{split_c*100:.1f}")
+pct_v_fmt = m._dec(f"{(1-split_c)*100:.1f}")
+if _srm["alerta"]:
+    st.markdown('<div class="banner bad">' + L(
+        f'🚨 Divisão dos grupos quebrada (SRM) — controle recebeu {pct_c_fmt}% dos usuários e a variante {pct_v_fmt}%. '
+        f'Teste qui-quadrado: p-valor {_p_srm} (abaixo de 0,001). Isso não é azar: alguma coisa na randomização ou no '
+        f'registro está mandando gente pro grupo errado. Ache a causa antes de confiar em qualquer número acima.',
+        f'🚨 Broken group split (SRM) — control got {pct_c_fmt}% of users and the variant {pct_v_fmt}%. '
+        f'Chi-square test: p-value {_p_srm} (below 0.001). This isn\'t bad luck: something in the randomization or '
+        f'the logging is sending people to the wrong group. Find the cause before trusting any number above.')
         + '</div>', unsafe_allow_html=True)
 else:
     st.markdown('<div class="banner good">' + L(
-        '✅ Nenhum aviso — a divisão de usuários entre os grupos está dentro do esperado (~50/50).',
-        '✅ No warning — the split of users between the groups is within what\'s expected (~50/50).')
+        f'✅ Divisão dos grupos OK — {pct_c_fmt}% × {pct_v_fmt}%, teste qui-quadrado com p-valor {_p_srm} (acima de 0,001): a diferença é do tamanho que o sorteio explica.',
+        f'✅ Group split OK — {pct_c_fmt}% × {pct_v_fmt}%, chi-square test with p-value {_p_srm} (above 0.001): the difference is the size chance explains.')
         + '</div>', unsafe_allow_html=True)
 
 with st.expander(L(f"🧮 Ver a conta por trás dos {pct_str}", f"🧮 See the math behind the {pct_str}")):
@@ -756,6 +814,86 @@ with st.expander(L(f"🧮 Ver a conta por trás dos {pct_str}", f"🧮 See the m
         f"we cut the 5% most pessimistic and 5% most optimistic simulations at each end, and keep the "
         f"\"middle\" range, which is where the real effect most likely is."
     ))
+    st.markdown(L(
+        f"**Passo 6 — perda esperada:** em cada simulação em que a Variante perdeu, anotamos **por quanto** "
+        f"ela perdeu (em % do Controle); nas que ganhou, a perda é zero. A média disso nas {nsim_fmt} "
+        f"simulações é o risco de aplicar a Variante: **{_perda_v}**. O risco de ficar com o Controle é a "
+        f"mesma conta ao contrário: **{_perda_c}**. Em fórmula: perda = média de máx(Controle − Variante, 0) ÷ Controle.",
+        f"**Step 6 — expected loss:** in each simulation where the Variant lost, we note **by how much** it "
+        f"lost (as % of the Control); where it won, the loss is zero. The average of that over the {nsim_fmt} "
+        f"simulations is the risk of rolling out the Variant: **{_perda_v}**. The risk of keeping the Control is "
+        f"the same math the other way around: **{_perda_c}**. As a formula: loss = mean of max(Control − Variant, 0) ÷ Control."
+    ))
+
+# --------------------------------------------------------------------------
+# Todos os grupos juntos (A/B/n) -- so aparece com 3 grupos ou mais
+# --------------------------------------------------------------------------
+
+if len(test["variantes"]) >= 2:
+    st.divider()
+    st.subheader(L("Todos os grupos juntos", "All groups together"))
+    mb = m.computar_multibraco(test, metric_cfg, periodo)
+    st.caption(L(
+        f"Com {len(mb['grupos'])} grupos, a pergunta muda de \"a variante bate o controle?\" pra \"qual é o "
+        f"melhor de todos?\". Em cada uma das {m.fmt_int(m.NSIM)} simulações, vemos qual grupo teve o melhor "
+        f"valor; a fração de vitórias é a chance de cada um ser o melhor. Comparar cada variante só contra o "
+        f"controle infla a chance de achar um vencedor por acaso — olhar todos juntos evita isso.",
+        f"With {len(mb['grupos'])} groups, the question changes from \"does the variant beat the control?\" to "
+        f"\"which one is the best of all?\". In each of the {m.fmt_int(m.NSIM)} simulations, we see which group "
+        f"had the best value; the share of wins is each one's chance of being the best. Comparing each variant "
+        f"only against the control inflates the chance of finding a winner by luck — looking at all of them "
+        f"together avoids that."
+    ))
+    _nome_grupo = lambda g: (f"{L('Grupo', 'Group')} A · {_controle}" if g["controle"]
+                             else f"{L('Grupo', 'Group')} {g['grupo']}")
+    _ordem = sorted(mb["grupos"], key=lambda g: g["p_melhor_de_todos"])
+    fig_mb = go.Figure(go.Bar(
+        x=[g["p_melhor_de_todos"] * 100 for g in _ordem],
+        y=[_nome_grupo(g) for g in _ordem], orientation="h",
+        marker_color=[COR_CONTROLE if g["controle"] else COR_VARIANTE for g in _ordem],
+        text=[m._dec(f"{g['p_melhor_de_todos']*100:.1f}") + "%" for g in _ordem], textposition="outside",
+        hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
+    ))
+    fig_mb.update_layout(
+        height=90 + 48 * len(_ordem), margin=dict(l=10, r=40, t=10, b=30),
+        xaxis=dict(title=L("Chance de ser o melhor de todos (%)", "Chance of being the best of all (%)"),
+                   range=[0, 110], ticksuffix="%"),
+        plot_bgcolor="white", showlegend=False,
+    )
+    st.plotly_chart(fig_mb, width="stretch")
+    st.table([
+        {
+            L("Grupo", "Group"): _nome_grupo(g),
+            L("Usuários", "Users"): m.fmt_int(g["usuarios"]),
+            metric_cfg["label"]: m.fmt_metric(g["valor"], metric_cfg),
+            L("Chance de ser o melhor", "Chance of being the best"): m._dec(f"{g['p_melhor_de_todos']*100:.1f}") + "%",
+            L("Perda esperada se escolher", "Expected loss if chosen"): m._dec(f"{g['perda_esperada']*100:.2f}") + "%",
+        }
+        for g in mb["grupos"]
+    ])
+    _melhor = max(mb["grupos"], key=lambda g: g["p_melhor_de_todos"])
+    _melhor_p = m._dec(f"{_melhor['p_melhor_de_todos'] * 100:.1f}") + "%"
+    _melhor_perda = m._dec(f"{_melhor['perda_esperada'] * 100:.2f}") + "%"
+    st.markdown('<div class="banner info">' + L(
+        f'🏆 {_esc(_nome_grupo(_melhor))} tem a maior chance de ser o melhor ({_melhor_p}). '
+        f'Se escolher ele e estiver errado, a perda média é de {_melhor_perda} do controle.',
+        f'🏆 {_esc(_nome_grupo(_melhor))} has the highest chance of being the best ({_melhor_p}). '
+        f'If you pick it and it\'s wrong, the average loss is {_melhor_perda} of the control.')
+        + '</div>', unsafe_allow_html=True)
+    _srm_mb = mb["srm"]
+    _divisao = " × ".join(m._dec(f"{p*100:.1f}") + "%" for p in _srm_mb["pcts"])
+    if _srm_mb["alerta"]:
+        st.markdown('<div class="banner bad">' + L(
+            f'🚨 SRM entre os {len(mb["grupos"])} grupos — divisão {_divisao}, qui-quadrado com {_srm_mb["graus"]} graus de liberdade, '
+            f'p-valor {m.fmt_p_valor(_srm_mb["p_valor"])}. A divisão planejada era igual; ache a causa antes de decidir.',
+            f'🚨 SRM across the {len(mb["grupos"])} groups — split {_divisao}, chi-square with {_srm_mb["graus"]} degrees of freedom, '
+            f'p-value {m.fmt_p_valor(_srm_mb["p_valor"])}. The planned split was even; find the cause before deciding.')
+            + '</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="banner good">' + L(
+            f'✅ Divisão entre os {len(mb["grupos"])} grupos OK — {_divisao}, p-valor {m.fmt_p_valor(_srm_mb["p_valor"])}.',
+            f'✅ Split across the {len(mb["grupos"])} groups OK — {_divisao}, p-value {m.fmt_p_valor(_srm_mb["p_valor"])}.')
+            + '</div>', unsafe_allow_html=True)
 
 st.divider()
 
